@@ -13,6 +13,7 @@ import {
   Tag,
   Truck,
 } from "lucide-react";
+import Reviews from "./Reviews";
 
 const Stars = ({ rate = 0 }) => {
   const rounded = Math.round(rate);
@@ -283,7 +284,11 @@ const ProductDetails = () => {
                 <span className="hidden h-4 w-px bg-slate-200 sm:block dark:bg-slate-700" />
                 <button
                   type="button"
-                  onClick={() => setTab("details")}
+                  onClick={() =>
+                    document
+                      .getElementById("reviews")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                  }
                   className="text-sm font-medium text-accent underline-offset-4 hover:underline dark:text-brand-400"
                 >
                   See all reviews
@@ -451,6 +456,10 @@ const ProductDetails = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {!loading && !error && product && (
+        <Reviews key={product.id} product={product} />
       )}
     </section>
   );
