@@ -1,18 +1,33 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "react-toastify";
 import {
   ArrowUpDown,
   BadgeCheck,
   ChevronDown,
   MessageSquare,
+  RefreshCw,
   Send,
   Star,
 } from "lucide-react";
+import CustomersSay from "./CustomersSay";
 
 /* ---------- helpers ---------- */
 
-const sentimentOf = (rating) =>
+/* Fallback for rows saved before the AI sentiment column existed. */
+const ratingSentiment = (rating) =>
   rating >= 4 ? "positive" : rating === 3 ? "neutral" : "negative";
+
+/*
+ * The backend stores POSITIVE / NEUTRAL / NEGATIVE / PENDING on every review.
+ * Legacy rows have no stored value yet, so fall back to the old rating rule.
+ */
+const normalizeSentiment = (value, rating) => {
+  const key = String(value || "").toLowerCase();
+  if (key === "positive" || key === "neutral" || key === "negative" || key === "pending") {
+    return key;
+  }
+  return ratingSentiment(rating);
+};
 
 const SENTIMENTS = {
   positive: {
@@ -30,6 +45,11 @@ const SENTIMENTS = {
     chip: "bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:ring-rose-500/20",
     dot: "bg-rose-500",
   },
+  pending: {
+    label: "Pending",
+    chip: "bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-500/10 dark:text-slate-300 dark:ring-slate-500/20",
+    dot: "bg-slate-400",
+  },
 };
 
 const FILTERS = [
@@ -37,6 +57,7 @@ const FILTERS = [
   { id: "positive", label: "Positive" },
   { id: "neutral", label: "Neutral" },
   { id: "negative", label: "Negative" },
+  { id: "pending", label: "Pending" },
 ];
 
 const RATING_LABELS = {
@@ -80,80 +101,39 @@ const timeAgo = (timestamp) => {
   });
 };
 
-const storageKey = (productId) => `product-reviews-${productId}`;
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
 
-const seedReviews = () => {
-  const day = 86400000;
-  const now = Date.now();
+const REVIEWS_API_URL = `${API_BASE_URL}/api/v1/reviews`;
 
-  return [
-    {
-      id: "seed-1",
-      name: "Priya Sharma",
-      rating: 5,
-      createdAt: now - 2 * day,
-      verified: true,
-      text: "Looks even better in person. The finish is clean, it feels premium, and the packaging was lovely. Would happily gift this to someone.",
-    },
-    {
-      id: "seed-2",
-      name: "Daniel Okafor",
-      rating: 2,
-      createdAt: now - 6 * day,
-      verified: true,
-      text: "Pretty design but smaller than I expected. The clasp felt a little delicate, so I'm not sure it will hold up to daily wear.",
-    },
-    {
-      id: "seed-3",
-      name: "Mei Lin",
-      rating: 4,
-      createdAt: now - 11 * day,
-      verified: true,
-      text: "Great value for the price. Arrived quickly and matched the photos. Docked one star because the box was slightly dented.",
-    },
-    {
-      id: "seed-4",
-      name: "Jonas Weber",
-      rating: 3,
-      createdAt: now - 18 * day,
-      verified: false,
-      text: "It's okay. Nothing wrong with the product, but nothing special either. Delivery took a little longer than the estimate.",
-    },
-    {
-      id: "seed-5",
-      name: "Aisha Khan",
-      rating: 5,
-      createdAt: now - 27 * day,
-      verified: true,
-      text: "Bought this for our anniversary and my partner loved it. Beautiful shine and very comfortable to wear.",
-    },
-    {
-      id: "seed-6",
-      name: "Carlos Mendes",
-      rating: 1,
-      createdAt: now - 43 * day,
-      verified: true,
-      text: "Not the quality I hoped for. The colour looked different from the listing and it tarnished within a week.",
-    },
-  ];
-};
+/* Maps the Spring Boot Review entity onto the shape this component renders. */
+const newLocalId = () =>
+  typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-const loadReviews = (productId) => {
+const toUiReview = (saved) => ({
+  id: String(saved.reviewId ?? saved.id ?? newLocalId()),
+  name: saved.userName ?? saved.name ?? "Anonymous",
+  rating: Number(saved.star ?? saved.rating ?? 0),
+  text: saved.review ?? saved.text ?? "",
+  createdAt: saved.reviewTimestamp
+    ? new Date(saved.reviewTimestamp).getTime()
+    : Date.now(),
+  verified: false,
+  sentiment: saved.sentiment ?? null,
+  sentimentConfidence: saved.sentimentConfidence ?? null,
+  sentimentSource: saved.sentimentSource ?? null,
+});
+
+const readErrorMessage = async (response) => {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(storageKey(productId)));
-    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    const body = await response.json();
+    if (body?.error) return body.error;
   } catch {
-    // fall through to seeded reviews
+    // response was not JSON
   }
-  return seedReviews();
-};
-
-const saveReviews = (productId, reviews) => {
-  try {
-    window.localStorage.setItem(storageKey(productId), JSON.stringify(reviews));
-  } catch {
-    // storage may be unavailable (private mode, quota) — reviews still work in memory
-  }
+  return `Request failed (${response.status})`;
 };
 
 /* ---------- small UI pieces ---------- */
@@ -220,7 +200,12 @@ const RatingPicker = ({ value, onChange }) => {
 };
 
 const ReviewCard = ({ review }) => {
-  const sentiment = SENTIMENTS[sentimentOf(review.rating)];
+  const sentimentKey = normalizeSentiment(review.sentiment, review.rating);
+  const sentiment = SENTIMENTS[sentimentKey];
+  const sentimentTitle =
+    review.sentimentConfidence != null
+      ? `AI sentiment (${Math.round(review.sentimentConfidence * 100)}% confidence)`
+      : "Sentiment pending AI classification";
 
   return (
     <article className="rounded-2xl border border-line bg-surface p-4 transition-colors duration-200 hover:border-brand-200 dark:hover:border-brand-500/40 sm:p-5">
@@ -250,6 +235,7 @@ const ReviewCard = ({ review }) => {
               · {timeAgo(review.createdAt)}
             </span>
             <span
+              title={sentimentTitle}
               className={`ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ${sentiment.chip}`}
             >
               <span className={`h-1.5 w-1.5 rounded-full ${sentiment.dot}`} />
@@ -276,7 +262,11 @@ const ReviewCard = ({ review }) => {
 /* ---------- main component ---------- */
 
 const Reviews = ({ product }) => {
-  const [reviews, setReviews] = useState(() => loadReviews(product.id));
+  const [reviews, setReviews] = useState([]);
+  const [status, setStatus] = useState("loading");
+  const [loadError, setLoadError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
   const [filter, setFilter] = useState("all");
   const [sort, setSort] = useState("latest");
   const [name, setName] = useState("");
@@ -284,13 +274,56 @@ const Reviews = ({ product }) => {
   const [text, setText] = useState("");
   const [formError, setFormError] = useState("");
 
+  /* Load this product's reviews from Postgres through the Spring Boot API. */
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+
+    setStatus("loading");
+    setLoadError("");
+
+    (async () => {
+      try {
+        const response = await fetch(
+          `${REVIEWS_API_URL}?productId=${encodeURIComponent(product.id)}`,
+          { signal: controller.signal }
+        );
+
+        if (!response.ok) {
+          throw new Error(await readErrorMessage(response));
+        }
+
+        const rows = await response.json();
+        if (!active) return;
+
+        setReviews(Array.isArray(rows) ? rows.map(toUiReview) : []);
+        setStatus("ready");
+      } catch (error) {
+        if (!active || error.name === "AbortError") return;
+        setLoadError(error.message);
+        setStatus("error");
+      }
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [product.id, attempt]);
+
   const counts = useMemo(() => {
-    const base = { all: reviews.length, positive: 0, neutral: 0, negative: 0 };
+    const base = { all: reviews.length, positive: 0, neutral: 0, negative: 0, pending: 0 };
     reviews.forEach((review) => {
-      base[sentimentOf(review.rating)] += 1;
+      base[normalizeSentiment(review.sentiment, review.rating)] += 1;
     });
     return base;
   }, [reviews]);
+
+  /* Only surface the Pending chip when the AI actually left something unlabelled. */
+  const filters = useMemo(
+    () => (counts.pending > 0 ? FILTERS : FILTERS.filter((option) => option.id !== "pending")),
+    [counts.pending]
+  );
 
   const average = useMemo(() => {
     if (reviews.length === 0) return 0;
@@ -311,7 +344,9 @@ const Reviews = ({ product }) => {
     const filtered =
       filter === "all"
         ? reviews
-        : reviews.filter((review) => sentimentOf(review.rating) === filter);
+        : reviews.filter(
+            (review) => normalizeSentiment(review.sentiment, review.rating) === filter
+          );
 
     return [...filtered].sort((a, b) =>
       sort === "latest"
@@ -320,7 +355,7 @@ const Reviews = ({ product }) => {
     );
   }, [reviews, filter, sort]);
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
 
     const cleanName = name.trim();
@@ -335,27 +370,47 @@ const Reviews = ({ product }) => {
       return;
     }
 
-    const review = {
-      id:
-        typeof crypto !== "undefined" && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      name: cleanName,
-      rating,
-      text: cleanText,
-      createdAt: Date.now(),
-      verified: false,
-    };
-
-    const next = [review, ...reviews];
-    setReviews(next);
-    saveReviews(product.id, next);
-    setText("");
-    setRating(5);
+    setSubmitting(true);
     setFormError("");
-    setFilter("all");
-    setSort("latest");
-    toast.success("Thanks! Your review has been posted.");
+
+    try {
+      const response = await fetch(REVIEWS_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productId: Number(product.id),
+          userName: cleanName,
+          star: rating,
+          review: cleanText,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response));
+      }
+
+      const saved = await response.json();
+      const savedReview = toUiReview(saved);
+
+      setReviews((current) => [
+        savedReview,
+        ...current.filter((review) => review.id !== savedReview.id),
+      ]);
+      setStatus("ready");
+      setText("");
+      setRating(5);
+      setFormError("");
+      setFilter("all");
+      setSort("latest");
+      toast.success("Thanks! Your review has been posted.");
+    } catch (error) {
+      setFormError(
+        error.message || "Your review could not be saved. Please try again."
+      );
+      toast.error("Your review could not be saved.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -375,7 +430,7 @@ const Reviews = ({ product }) => {
             <Star size={13} className="fill-star text-star" />
             {average.toFixed(1)} average
             <span className="font-normal text-muted">
-              · {reviews.length} reviews
+              · {reviews.length} {reviews.length === 1 ? "review" : "reviews"}
             </span>
           </span>
         </div>
@@ -428,7 +483,146 @@ const Reviews = ({ product }) => {
             </div>
           </div>
 
-          {/* write a review */}
+          {/* AI summary above the review list */}
+          <CustomersSay product={product} reviews={reviews} />
+        </div>
+
+        {/* toolbar: filters + sort */}
+        <div className="mt-8 flex flex-col gap-3 border-t border-line pt-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter reviews">
+            {filters.map((option) => {
+              const active = filter === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setFilter(option.id)}
+                  className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+                    active
+                      ? "border-brand-600 bg-brand-600 text-white shadow-sm shadow-brand-600/25"
+                      : "border-line bg-surface text-body hover:border-brand-200 hover:bg-brand-50 hover:text-accent"
+                  }`}
+                >
+                  {option.id !== "all" && (
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        active
+                          ? "bg-white"
+                          : SENTIMENTS[option.id].dot
+                      }`}
+                    />
+                  )}
+                  {option.label}
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                      active
+                        ? "bg-white/20 text-white"
+                        : "bg-slate-100 text-muted dark:bg-slate-700"
+                    }`}
+                  >
+                    {counts[option.id]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="relative self-start lg:self-auto">
+            <ArrowUpDown
+              size={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+            />
+            <select
+              aria-label="Sort reviews"
+              value={sort}
+              onChange={(event) => setSort(event.target.value)}
+              className="w-full appearance-none rounded-xl border border-line bg-surface py-2 pl-9 pr-9 text-sm font-medium text-body outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+            >
+              <option value="latest">Latest first</option>
+              <option value="oldest">Oldest first</option>
+            </select>
+            <ChevronDown
+              size={15}
+              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted"
+            />
+          </div>
+        </div>
+
+        {/* review list */}
+        <div className="mt-5 space-y-4">
+          {status === "loading" ? (
+            <div aria-hidden="true" className="space-y-4">
+              {[0, 1, 2].map((row) => (
+                <div
+                  key={row}
+                  className="animate-pulse rounded-2xl border border-line bg-surface p-4 sm:p-5"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="h-10 w-10 shrink-0 rounded-full bg-slate-200 dark:bg-slate-700" />
+                    <div className="flex-1">
+                      <div className="h-3 w-40 rounded-full bg-slate-200 dark:bg-slate-700" />
+                      <div className="mt-3 h-2.5 w-full rounded-full bg-slate-200 dark:bg-slate-700" />
+                      <div className="mt-2 h-2.5 w-9/12 rounded-full bg-slate-200 dark:bg-slate-700" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : status === "error" ? (
+            <div className="rounded-2xl border border-dashed border-line bg-slate-50/60 p-10 text-center dark:bg-slate-800/40">
+              <MessageSquare
+                size={28}
+                strokeWidth={1.5}
+                className="mx-auto text-muted"
+              />
+              <p className="mt-3 text-sm font-semibold text-ink">
+                We couldn&apos;t load the reviews
+              </p>
+              <p className="mt-1 text-xs text-muted">
+                {loadError || "Please check that the backend is running."}
+              </p>
+              <button
+                type="button"
+                onClick={() => setAttempt((value) => value + 1)}
+                className="btn btn-ghost mt-4"
+              >
+                <RefreshCw size={14} />
+                Try again
+              </button>
+            </div>
+          ) : visibleReviews.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-line bg-slate-50/60 p-10 text-center dark:bg-slate-800/40">
+              <MessageSquare
+                size={28}
+                strokeWidth={1.5}
+                className="mx-auto text-muted"
+              />
+              <p className="mt-3 text-sm font-semibold text-ink">
+                No {filter === "all" ? "" : `${filter} `}reviews yet
+              </p>
+              <p className="mt-1 text-xs text-muted">
+                Try a different filter or be the first to share your thoughts.
+              </p>
+              {filter !== "all" && (
+                <button
+                  type="button"
+                  onClick={() => setFilter("all")}
+                  className="btn btn-ghost mt-4"
+                >
+                  Show all reviews
+                </button>
+              )}
+            </div>
+          ) : (
+            visibleReviews.map((review) => (
+              <ReviewCard key={review.id} review={review} />
+            ))
+          )}
+        </div>
+
+        {/* write a review — below the review list */}
+        <div className="mt-8 border-t border-line pt-6">
           <form
             onSubmit={handleSubmit}
             className="rounded-2xl border border-line bg-surface p-5"
@@ -498,106 +692,16 @@ const Reviews = ({ product }) => {
 
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
               <span className="text-xs text-muted">{text.length}/500</span>
-              <button type="submit" className="btn btn-primary">
+              <button
+                type="submit"
+                disabled={submitting}
+                className="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+              >
                 <Send size={15} strokeWidth={1.9} />
-                Post review
+                {submitting ? "Posting…" : "Post review"}
               </button>
             </div>
           </form>
-        </div>
-
-        {/* toolbar: filters + sort */}
-        <div className="mt-8 flex flex-col gap-3 border-t border-line pt-6 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter reviews">
-            {FILTERS.map((option) => {
-              const active = filter === option.id;
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => setFilter(option.id)}
-                  className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
-                    active
-                      ? "border-brand-600 bg-brand-600 text-white shadow-sm shadow-brand-600/25"
-                      : "border-line bg-surface text-body hover:border-brand-200 hover:bg-brand-50 hover:text-accent"
-                  }`}
-                >
-                  {option.id !== "all" && (
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${
-                        active
-                          ? "bg-white"
-                          : SENTIMENTS[option.id].dot
-                      }`}
-                    />
-                  )}
-                  {option.label}
-                  <span
-                    className={`rounded-full px-1.5 py-0.5 text-[10px] ${
-                      active
-                        ? "bg-white/20 text-white"
-                        : "bg-slate-100 text-muted dark:bg-slate-700"
-                    }`}
-                  >
-                    {counts[option.id]}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="relative self-start lg:self-auto">
-            <ArrowUpDown
-              size={15}
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
-            />
-            <select
-              aria-label="Sort reviews"
-              value={sort}
-              onChange={(event) => setSort(event.target.value)}
-              className="w-full appearance-none rounded-xl border border-line bg-surface py-2 pl-9 pr-9 text-sm font-medium text-body outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-            >
-              <option value="latest">Latest first</option>
-              <option value="oldest">Oldest first</option>
-            </select>
-            <ChevronDown
-              size={15}
-              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted"
-            />
-          </div>
-        </div>
-
-        {/* review list */}
-        <div className="mt-5 space-y-4">
-          {visibleReviews.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-line bg-slate-50/60 p-10 text-center dark:bg-slate-800/40">
-              <MessageSquare
-                size={28}
-                strokeWidth={1.5}
-                className="mx-auto text-muted"
-              />
-              <p className="mt-3 text-sm font-semibold text-ink">
-                No {filter === "all" ? "" : `${filter} `}reviews yet
-              </p>
-              <p className="mt-1 text-xs text-muted">
-                Try a different filter or be the first to share your thoughts.
-              </p>
-              {filter !== "all" && (
-                <button
-                  type="button"
-                  onClick={() => setFilter("all")}
-                  className="btn btn-ghost mt-4"
-                >
-                  Show all reviews
-                </button>
-              )}
-            </div>
-          ) : (
-            visibleReviews.map((review) => (
-              <ReviewCard key={review.id} review={review} />
-            ))
-          )}
         </div>
       </div>
     </section>

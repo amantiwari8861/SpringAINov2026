@@ -24,7 +24,7 @@ const Navbar = () => {
     <header className="sticky top-0 z-40 border-b border-line bg-surface/80 backdrop-blur-md">
       <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
         <Link
-          to="/data-table"
+          to="/seller/list-product"
           className="flex items-center gap-2 font-display text-xl font-bold tracking-tight text-ink"
         >
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-sm font-extrabold text-white shadow-sm shadow-brand-600/30">

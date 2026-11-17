@@ -16,6 +16,7 @@ import Cart from "./pages/Cart";
 import LearnUseRef from "./components/LearnUseRef";
 import Memoization from "./components/Memoization";
 import DataTable from './pages/DataTable'
+import ListProduct from "./pages/seller/ListProduct";
 
 const router = createBrowserRouter([
   {
@@ -70,6 +71,10 @@ const router = createBrowserRouter([
       {
         path: "learn-memo",
         element: <Memoization />,
+      },
+      {
+        path: "seller/list-product",
+        element: <ListProduct />,
       },
       {
         path: "dashboard/admin",
