@@ -27,10 +27,6 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/reviews")
-@CrossOrigin(
-        origins = {"http://localhost:3000", "http://localhost:5173", "http://iamandroid.in:5173", "https://iamandroid.in"},
-        allowCredentials = "true"
-)
 public class ReviewController {
 
     private final ReviewService reviewService;

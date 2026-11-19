@@ -10,10 +10,6 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/v1/openai")
-@CrossOrigin(
-        origins = {"http://localhost:3000","http://localhost:5173","http://iamandroid.in:5173","https://iamandroid.in",},
-        allowCredentials = "true"
-)
 public class OpenAIChatController {
 
     private final OpenAiService openAiService;

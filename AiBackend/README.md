@@ -82,4 +82,16 @@ DB_PASSWORD=1234
 
 sudo chmod 600 /etc/aibackend.env
 sudo chown root:root /etc/aibackend.env
+
+sudo systemctl daemon-reload
+sudo systemctl enable aibackend
+sudo systemctl start aibackend
+sudo systemctl status aibackend
+
+
+git add AiBackend/README.md
+git commit --amend --no-edit
+git log -2 --oneline
+git reset --soft HEAD~2
+git commit -m "Configure OpenAI integration"
 ```
