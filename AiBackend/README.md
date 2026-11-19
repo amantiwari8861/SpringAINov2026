@@ -50,4 +50,36 @@ sudo certbot --nginx -d api.iamandroid.in
 
 https://api.iamandroid.in/api/v1/openai/chat?prompt=from now your name is siri
 
+ AiBackend-0.0.1-SNAPSHOT.jar
+ sudo nano /etc/systemd/system/aibackend.service
+
+[Unit]
+Description=Spring Boot AI Backend
+After=network.target postgresql.service
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/SpringAINov2026/AiBackend
+
+ExecStart=/usr/bin/java -jar /home/ubuntu/SpringAINov2026/AiBackend/target/AiBackend-0.0.1-SNAPSHOT.jar --spring.profiles.active=openai
+
+SuccessExitStatus=143
+Restart=always
+RestartSec=10
+
+EnvironmentFile=/etc/aibackend.env
+
+[Install]
+WantedBy=multi-user.target
+ 
+ 
+ 
+ 
+sudo nano /etc/aibackend.env
+OPENAI_API_KEY=sk-your_api_key_here
+
+DB_PASSWORD=1234
+
+sudo chmod 600 /etc/aibackend.env
+sudo chown root:root /etc/aibackend.env
 ```
